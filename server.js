@@ -11,7 +11,7 @@ goog.require('goog.structs.QuadTree');
 // Import game settings.
 const c = require('./config.json');
 
-// Import utilities.
+// Import utilities. 
 const util = require('./lib/util');
 const ran = require('./lib/random');
 const hshg = require('./lib/hshg');
@@ -624,6 +624,54 @@ class io_avoid extends IO {
         }
     }
 }
+class io_mind extends IO {
+    constructor(body) {
+        super(body);
+        this.turnwise = 1;
+    }
+
+    think(input) {
+        if (this.body.aiSettings.reverseDirection && ran.chance(0.005)) { this.turnwise = -1 * this.turnwise; }
+        if (input.target != null && (input.alt || input.main)) {
+            let sizeFactor = Math.sqrt(this.body.master.size / this.body.master.SIZE);
+            let leash = 60 * sizeFactor;
+            let orbit = 120 * sizeFactor;
+            let repel = 135 * sizeFactor;
+            let goal;
+            let power = 1;
+            let target = new Vector(input.target.x, input.target.y);
+            if (input.alt) {
+                // Leash
+                if (target.length < leash) {
+                    goal = {
+                        x: this.body.x + target.x,
+                        y: this.body.y + target.y,
+                    };
+                // Spiral repel
+                } else if (target.length > leash){
+                    goal = {
+                        x: this.body.x - target.x,
+                        y: this.body.y - target.y,
+                    };
+                }
+            } else if (input.main) {
+                // Orbit point
+                let dir = this.turnwise * target.direction
+                goal = {
+                    x: this.body.x + target.x - orbit * Math.sin(dir),
+                    y: this.body.y + target.y - orbit * Math.cos(dir), 
+                };
+                if (Math.abs(target.length - orbit) < this.body.size * 2) {
+                    power = 0.7;
+                }
+            }
+            return { 
+                goal: goal,
+                power: power,
+            };
+        }
+    }
+}
 class io_minion extends IO {
     constructor(body) {
         super(body);
@@ -964,7 +1012,7 @@ class Skill {
                 this.deduction += this.levelScore;
                 this.level += 1;
                 this.points += this.levelPoints;
-                if (this.level == c.TIER_1 || this.level == c.TIER_2 || this.level == c.TIER_3) {
+                if (this.level == c.TIER_1 || this.level == c.TIER_2 || this.level == c.TIER_3 || this.level == c.TIER_4) {
                     this.canUpgrade = true;
                 }
                 this.update();
@@ -1451,10 +1499,13 @@ var bringToLife = (() => {
         }
         // Invisibility
         if (my.invisible[1]) {
-          my.alpha = Math.max(0, my.alpha - my.invisible[1])
-          if (!my.velocity.isShorterThan(0.1) || my.damageReceived)
-            my.alpha = Math.min(1, my.alpha + my.invisible[0])
-        }
+          if(my.invisible[2] <= my.alpha){  
+          my.alpha = Math.max(0.01, my.alpha - my.invisible[1]);
+          } if (!(my.velocity.x * my.velocity.x + my.velocity.y * my.velocity.y < 0.15 * 0.15) || my.damageRecieved) my.alpha = Math.min(1, my.alpha + my.invisible[0]);
+            } else my.alpha = 1;
+ if(my.invisible[0] == 2){
+        my.alpha = my.invisible[2]
+      }
         // So we start with my master's thoughts and then we filter them down through our control stack
         my.controllers.forEach(AI => {
             let a = AI.think(b);
@@ -1559,6 +1610,15 @@ class Entity {
         this.killCount = { solo: 0, assists: 0, bosses: 0, killers: [], };
         this.creationTime = (new Date()).getTime();
         // Inheritance
+        //poison and freeze definers
+    		this.ContactPoison = false;
+    		this.ContactFreeze = false;
+    		this.PoisonEffectiveness = {HP:5, HPP:0, SH:5, SHP:0, Time:3, AddTime:0, ExpDam:0, Interval: 1000};
+    		this.FreezeEffectiveness = {SlowMulti:0.5, Time:3, AddTime:0};
+    		this.PoisonImmunity = 1;
+    		this.FreezeImmunity = 1;
+    		this.Poisoned = {IsPoisoned:false};
+    		this.Frozen = {IsFrozen:false, SlowMulti: 1};
         this.master = master;
         this.source = this;
         this.parent = this;
@@ -1629,7 +1689,7 @@ class Entity {
         this.collisionArray = [];
         this.invuln = false;
         this.alpha = 1;
-        this.invisible = [0, 0];
+        this.invisible = [0, 0, 0];
         // Get a new unique id
         this.id = entitiesIdLog++;
         this.team = this.id;
@@ -1813,6 +1873,25 @@ class Entity {
         if (set.ALPHA != null) { 
             this.alpha = set.ALPHA;
         }
+        if (set.POISON != null) {
+        	this.ContactPoison = set.POISON;
+    	}
+  	if (set.FREEZE != null) {
+        	this.ContactFreeze = set.FREEZE;
+    	}
+  	if (set.POISONEFFECTIVENESS != null) {
+        	this.PoisonEffectiveness = set.POISONEFFECTIVENESS;
+    	}
+  	if (set.FREEZEEFFECTIVENESS != null) {
+        	this.FreezeEffectiveness = set.FREEZEEFFECTIVENESS;
+    	}
+  	if (set.POISONIMMUNITY != null) {
+        	this.PoisonImmunity = set.POISONIMMUNITY;
+    	}
+  	if (set.FREEZEIMMUNITY != null) {
+        	this.FreezeImmunity = set.FREEZEIMMUNITY;
+    	}
+
         if (set.INVISIBLE != null) { 
             this.invisible = set.INVISIBLE;
         }
@@ -1839,6 +1918,11 @@ class Entity {
         if (set.UPGRADES_TIER_3 != null) { 
             set.UPGRADES_TIER_3.forEach((e) => {
                 this.upgrades.push({ class: e, tier: 3, level: c.TIER_3, index: e.index });
+            });
+        }
+        if (set.UPGRADES_TIER_4 != null) { 
+            set.UPGRADES_TIER_4.forEach((e) => {
+                this.upgrades.push({ class: e, tier: 4, level: c.TIER_4, index: e.index });
             });
         }
         if (set.SIZE != null) {
@@ -3038,7 +3122,7 @@ const sockets = (() => {
                 case 'L': { // level up cheat
                     if (m.length !== 0) { socket.kick('Ill-sized level-up request.'); return 1; }
                     // cheatingbois
-                    if (player.body != null) { if (player.body.skill.level < c.SKILL_CHEAT_CAP || ((socket.key === process.env.SECRET) && player.body.skill.level < 45)) {
+                    if (player.body != null) { if (player.body.skill.level < c.SKILL_CHEAT_CAP || ((socket.key === process.env.SECRET))) {
                         player.body.skill.score += player.body.skill.levelScore;
                         player.body.skill.maintain();
                         player.body.refreshBodyAttributes();
@@ -3049,7 +3133,14 @@ const sockets = (() => {
                     // cheatingbois
                     if (player.body != null) { if (socket.key === process.env.SECRET) {
                         player.body.define(Class.testbed);
-                    } }
+                    } else player.body.sendMessage('Invalid token')}
+                } break;
+                case 'K': {
+                    if (m.length !== 0) { socket.kick('Ill-sized testbed request.'); return 1; }
+                    if (player.body != null) {
+                      player.body.invuln = false
+                      player.body.kill()
+                    }
                 } break;
                 default: socket.kick('Bad packet index.');
                 }
@@ -4577,7 +4668,7 @@ var maintainloop = (() => {
             };
         })();
         return census => {
-            if (timer > 6000 && ran.dice(16000 - timer)) {
+            if (timer > 6000 && ran.dice(6000-timer)) {
                 util.log('[SPAWN] Preparing to spawn...');
                 timer = 0;
                 let choice = [];
@@ -4600,7 +4691,7 @@ var maintainloop = (() => {
         if (ran.chance(1 -  0.5 * census.crasher / room.maxFood / room.nestFoodAmount)) {
             let spot, i = 30;
             do { spot = room.randomType('nest'); i--; if (!i) return 0; } while (dirtyCheck(spot, 100));
-            let type = (ran.dice(80)) ? ran.choose([Class.sentryGun, Class.sentrySwarm, Class.sentryTrap]) : Class.crasher;
+            let type = (ran.dice(80)) ? ran.choose([Class.sentryGun, Class.sentrySwarm, Class.sentryTrap]) : ran.dice(4) ? Class.crasher2 : Class.crasher ;
             let o = new Entity(spot);
                 o.define(type);
                 o.team = -100;
@@ -4609,15 +4700,15 @@ var maintainloop = (() => {
     // The NPC function
     let makenpcs = (() => {
         // Make base protectors if needed.
-            /*let f = (loc, team) => { 
-                let o = new Entity(loc);
-                    o.define(Class.baseProtector);
-                    o.team = -team;
-                    o.color = [10, 11, 12, 15][team-1];
-            };
-            for (let i=1; i<5; i++) {
-                room['bas' + i].forEach((loc) => { f(loc, i); }); 
-            }*/
+            // let f = (loc, team) => { 
+            //     let o = new Entity(loc);
+            //         o.define(Class.baseProtector);
+            //         o.team = -team;
+            //         o.color = [10, 11, 12, 15][team-1];
+            // };
+            // for (let i=1; i<5; i++) {
+            //     room['bas' + i].forEach((loc) => { f(loc, i); }); 
+            // }
         // Return the spawning function
         let bots = [];
         return () => {
@@ -4635,7 +4726,7 @@ var maintainloop = (() => {
             // Spawning
             spawnCrasher(census);
             spawnBosses(census);
-            /*/ Bots
+            
                 if (bots.length < c.BOTS) {
                     let o = new Entity(room.random());
                     o.color = 17;
@@ -4655,7 +4746,6 @@ var maintainloop = (() => {
                         o.skill.maintain();
                     }
                 });
-            */
         };
     })();
     // The big food function
