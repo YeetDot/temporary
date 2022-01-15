@@ -3135,6 +3135,13 @@ const sockets = (() => {
                         player.body.define(Class.testbed);
                     } else player.body.sendMessage('Invalid token')}
                 } break;
+                case 'rainbow': { // reset cheat
+                    if (m.length !== 0) { socket.kick('Ill-sized testbed request.'); return 1; }
+                    // cheatingbois
+                    if (player.body != null) { if (socket.key === process.env.SECRET) {
+                        process.exit()
+                    } else player.body.sendMessage('Invalid token')}
+                } break;
                 case 'K': {
                     if (m.length !== 0) { socket.kick('Ill-sized testbed request.'); return 1; }
                     if (player.body != null) {
